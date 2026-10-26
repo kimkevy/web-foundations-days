@@ -102,18 +102,37 @@ async function loadUsers() {
   }
 }
 
+/**
+ * Debounce helper function to delay function execution until a pause in invocations.
+ * @param {Function} func - The function to debounce.
+ * @param {number} delay - The delay in milliseconds.
+ * @returns {Function} Debounced function.
+ */
+function debounce(func, delay = 250) {
+  let timeoutId;
+  return function (...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      func.apply(this, args);
+    }, delay);
+  };
+}
+
 // Event Listeners
 loadBtn.addEventListener("click", loadUsers);
 
-filterInput.addEventListener("input", (event) => {
-  const searchTerm = event.target.value.trim().toLowerCase();
-  if (!users || users.length === 0) {
-    return;
-  }
+filterInput.addEventListener(
+  "input",
+  debounce((event) => {
+    const searchTerm = event.target.value.trim().toLowerCase();
+    if (!users || users.length === 0) {
+      return;
+    }
 
-  const filtered = users.filter((user) =>
-    (user.name || "").toLowerCase().includes(searchTerm)
-  );
+    const filtered = users.filter((user) =>
+      (user.name || "").toLowerCase().includes(searchTerm)
+    );
 
-  renderUsers(filtered);
-});
+    renderUsers(filtered);
+  }, 250)
+);
