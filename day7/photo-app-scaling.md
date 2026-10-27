@@ -157,3 +157,24 @@ Storing raw media binaries (BLOBs) inside relational databases introduces critic
 - **Decision:** Utilize a hybrid feed architecture (Fanout-on-Write for regular users, Fanout-on-Read for high-follower celebrity accounts).
 - **Advantage:** Pre-computing feeds into an in-memory cache upon photo upload ensures lightning-fast feed view speeds ($O(1)$ lookup for $579$ to $2,894$ views/sec) without executing complex relational SQL joins across millions of follower records on every feed refresh.
 - **Drawback (Trade-off):** Consumes substantial in-memory cache storage, and when a celebrity with millions of followers posts a photo, broadcasting that post to all follower feeds simultaneously ("hotkey / fanout explosion") creates a massive spike in background worker write operations.
+
+---
+
+## 9. Asynchronous Queue Retries and Thumbnail Failure Handling
+
+To guarantee system resilience and prevent transient issues (e.g., worker memory pressure, network drops, corrupted files) from causing permanent data inconsistency, the thumbnail processing pipeline implements a robust retry and failure handling strategy:
+
+1. **Exponential Backoff with Jitter:**
+   - When a worker encounters a transient error (such as a timeout downloading from object storage or temporary CPU exhaustion), the job is not dropped.
+   - The message is re-queued with exponential backoff (e.g., retry after 2s, 4s, 8s) combined with randomized jitter to prevent "thundering herd" spikes on downstream services.
+
+2. **Retry Limit & Dead Letter Queue (DLQ):**
+   - Each job carries a retry counter (typically capped at 3 to 5 attempts).
+   - If a job exceeds the maximum retry limit (often indicating permanent failures like corrupted image headers or unsupported encoding formats), it is automatically routed to a **Dead Letter Queue (DLQ)**.
+   - Operating engineers configure alerts on DLQ queue depth to inspect unprocessable payloads without blocking healthy traffic in the primary queue.
+
+3. **Graceful UI Fallbacks & Self-Healing:**
+   - **Client-Side Fallback:** While a thumbnail is retrying—or if it is flagged in the DLQ—the feed API returns the original image URL or a dynamic blur placeholder so the user never sees a broken image icon.
+   - **Database Status Flagging:** When an item is moved to the DLQ, the worker flags the photo record in the primary database as `thumbnail_failed`.
+   - **On-Demand Reprocessing:** Administrative or automated recovery scripts can reprocess failed messages from the DLQ once patches or downstream connectivity are restored.
+
